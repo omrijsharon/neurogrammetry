@@ -1,13 +1,17 @@
 import cv2
 import numpy as np
 
+from utils.file_handler import img_iter
+
+
 # Load the images
 image_paths = ['image1.jpg', 'image2.jpg', 'image3.jpg']
-images = [cv2.imread(path) for path in image_paths]
+path = r'C:\Users\omri_\OneDrive\Documents\neurogrametry_data\dogarden'
+images = img_iter(path)
 
 # Define the known intrinsic matrix and distortion coefficients
-camera_matrix = np.array([[fx, 0, cx], [0, fy, cy], [0, 0, 1]])
-dist_coeffs = np.array([k1, k2, p1, p2, k3])
+# camera_matrix = np.array([[fx, 0, cx], [0, fy, cy], [0, 0, 1]])
+# dist_coeffs = np.array([k1, k2, p1, p2, k3])
 
 # Define the image size
 image_size = (images[0].shape[1], images[0].shape[0])
