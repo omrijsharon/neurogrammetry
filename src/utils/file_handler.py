@@ -17,6 +17,6 @@ def img_iter(dir_path, file_ext='jpg'):
 
 
 if __name__ == '__main__':
-    path = r'C:\Users\omri_\OneDrive\Documents\neurogrametry_data\dogarden'
+    path = r'C:\Users\omri_\OneDrive\Documents\fpv\dji_airunit\2022_12_0910_sgula_kfar_hes_track\DJIU0017.mp4'
     img_files = dir_img_list(path)
     print(img_files)

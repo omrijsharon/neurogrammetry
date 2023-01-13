@@ -57,7 +57,7 @@ for image in images:
     # create a side-by-side image
     img3 = np.hstack((img1, img2))
     cv2.imshow('image3', img3)
-    cv2.waitKey(5000)
+    cv2.waitKey(1)
     cv2.destroyAllWindows()
 
 
