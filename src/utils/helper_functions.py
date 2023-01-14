@@ -43,29 +43,29 @@ def find_calib_file(video_file, camera_name, calib_dir=None):
     name_idx = -1
     for i, cam_name in enumerate(camera_name):
         if cam_name.lower() in existing_cameras:
-            cam_name = cam_name.lower()
+            cam_manifacture = cam_name.lower()
             name_idx = i
             break
     assert name_idx != -1, 'Camera name not found in calibration directory'
     del camera_name[name_idx]
     existing_models = [model_name.lower() for model_name in os.listdir(os.path.join(calib_dir, cam_name))]
-    filtered_models = []
     for i, cam_name in enumerate(camera_name):
         existing_models = [model.lower() for model in existing_models if cam_name.lower() in model]
-    existing_models = [model.lower() for model in existing_models if fps_str.lower() in model]
     existing_models = [model.lower() for model in existing_models if resolution in model]
+    if "0.00fps" in existing_models[0]: # in case of dji airunit 1080p
+        existing_models = [existing_models[0]]
+    else: # keep on filtering by fps
+        existing_models = [model.lower() for model in existing_models if fps_str.lower() in model]
     assert len(existing_models) == 1, 'More than one calibration file found: {}'.format(existing_models)
-    calib_file = os.path.join(calib_dir, camera_name, existing_models[0]+'.json')
+    calib_file = os.path.join(calib_dir, cam_manifacture, existing_models[0])
     return calib_file
 
-def load_calibration_file(file_path, camera_name, resolution, fps):
-    data = read_json_file(file_path)
-    intrinsic_matrix = np.eye(3)
-    intrinsic_matrix[0, 0] = data['f_x']
-    intrinsic_matrix[0, 0] = data['f_y']
-    intrinsic_matrix[0, 2] = data['c_x']
-    intrinsic_matrix[1, 2] = data['c_y']
-    dist_coeffs = np.array(data['distortion_coefficients'])
+
+def load_calibration_file(video_file, camera_model):
+    calib_file = find_calib_file(video_file, camera_model, calib_dir=None)
+    calib_data = read_json_file(calib_file)
+    intrinsic_matrix = np.array(calib_data['fisheye_params']['camera_matrix'])
+    dist_coeffs = np.array(calib_data['fisheye_params']['distortion_coeffs'])
     return intrinsic_matrix, dist_coeffs
 
 
@@ -133,32 +133,35 @@ class FrameIterator:
 
 
 class FramePrevIterator:
-    def __init__(self, video_path, calib_path, nfeatures, scale_factor):
-        self.intrinsic_matrix, self.dist_coeffs = load_calibration_file(calib_path)
+    def __init__(self, video_path, camera_model, nfeatures, scale_factor, calib_path=None):
+        self.intrinsic_matrix, self.dist_coeffs = load_calibration_file(video_path, camera_model=camera_model)
         self.focal_length = self.intrinsic_matrix[0, 0]
         self.scale_factor = scale_factor
         self.pp = (int(self.intrinsic_matrix[0, 2]), int(self.intrinsic_matrix[1, 2]))
         self.video = cv2.VideoCapture(video_path)
         self.success, self.image = self.video.read()
-        self.image = resize_image(self.image, self.scale_factor)
         self.prev_gray = cv2.cvtColor(self.image, cv2.COLOR_BGR2GRAY)
-        # self.prev_gray = undistoret_image(self.prev_gray, self.intrinsic_matrix, self.dist_coeffs)
+        self.prev_gray = undistoret_image(self.prev_gray, self.intrinsic_matrix, self.dist_coeffs)
+        self.prev_gray = resize_image(self.prev_gray, self.scale_factor)
         self.gray = self.prev_gray.copy()
         self.orb = cv2.ORB_create(nfeatures=nfeatures)
         self.kp1, self.des1 = self.orb.detectAndCompute(self.prev_gray, None)
         self.t = np.zeros((3, 1))
         self.R = np.eye(3)
+        self.frame_idx = 1
 
     def __iter__(self):
         return self
 
     def __next__(self):
         if not self.success:
+            print('Done frame {}'.format(self.frame_idx))
             self.video.release()
             raise StopIteration
         self.prev_gray = self.gray
         self.gray = cv2.cvtColor(self.image, cv2.COLOR_BGR2GRAY)
-        # self.gray = undistoret_image(self.gray, self.intrinsic_matrix, self.dist_coeffs)
+        self.gray = undistoret_image(self.gray, self.intrinsic_matrix, self.dist_coeffs)
+        self.gray = resize_image(self.gray, self.scale_factor)
         kp2, des2 = self.orb.detectAndCompute(self.gray, None)
         bf = cv2.BFMatcher(cv2.NORM_HAMMING, crossCheck=True)
         matches = bf.match(self.des1, des2)
@@ -167,7 +170,7 @@ class FramePrevIterator:
         next_pts = np.float32([kp2[m.trainIdx].pt for m in matches]).reshape(-1, 1, 2)
         self.kp1, self.des1 = kp2, des2
         self.success, self.image = self.video.read()
-        self.image = resize_image(self.image, self.scale_factor)
+        self.frame_idx += 1
         E, _ = cv2.findEssentialMat(next_pts, prev_pts, self.focal_length, self.pp, cv2.RANSAC, 0.999, 1.0, None)
         _, R, t, _ = cv2.recoverPose(E, prev_pts, next_pts)
         self.t = self.t + self.R.dot(t)
@@ -180,9 +183,8 @@ class FramePrevIterator:
 
 
 if __name__ == '__main__':
-    video_path = r'C:\Users\omri_\OneDrive\Documents\fpv\gopro\Yom_kipur_bike\GH010001.mp4'
-    calib_path = r'C:\Users\omri_\PycharmProjects\neurogrammetry\config\dji_airunit_calib.yaml'
-    find_calib_file(video_path, camera_name="gopro black hero7")
+    video_path = r'C:\Users\omri_\OneDrive\Documents\fpv\dji_airunit\2022_12_0910_sgula_kfar_hes_track\DJIU0020.mp4'
+    camera_model = 'DJI air unit'
     R_total = np.eye(3)
     t_total = np.zeros((3, 1))
     # initialization of a 3d plot with matplotlib:
@@ -196,7 +198,7 @@ if __name__ == '__main__':
     # ax.set_zlim3d(-1, 1)
     # ax.view_init(azim=0, elev=90)
 
-    for prev_frame, frame, prev_pts, pts, R, t in FramePrevIterator(video_path, calib_path, 2000, scale_factor=0.5):
+    for prev_frame, frame, prev_pts, pts, R, t in FramePrevIterator(video_path, camera_model, 2000, scale_factor=0.5):
         t_total = np.matmul(CAM2WORLD, t).flatten()
         ax.scatter(t_total[0], t_total[1], t_total[2], c='r', marker='o')
         plt.pause(0.001)
