@@ -1,7 +1,10 @@
+import os
 import cv2
 import numpy as np
 import matplotlib.pyplot as plt
 import yaml
+import json
+
 
 CAM2WORLD = np.array([[-1, 0, 0],
                       [0, -1, 0],
@@ -14,8 +17,49 @@ def read_yaml_file(file_path):
     return d
 
 
-def load_calibration_file(file_path):
-    data = read_yaml_file(file_path)
+def read_json_file(file_path):
+    with open(file_path) as file:
+            d = json.load(file)
+    return d
+
+
+def get_video_details(video_path):
+    cap = cv2.VideoCapture(video_path)
+    fps = cap.get(cv2.CAP_PROP_FPS)
+    width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+    height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+    cap.release()
+    return fps, width, height
+
+
+def find_calib_file(video_file, camera_name, calib_dir=None):
+    if calib_dir is None:
+        calib_dir = r'C:\Users\omri_\OneDrive\Documents\repos\gyroflow\resources\camera_presets'
+    fps, width, height = get_video_details(video_file)
+    fps_str = "{:.2f}fps".format(fps)
+    resolution = "{}x{}".format(width, height)
+    existing_cameras = [cam_name.lower() for cam_name in os.listdir(calib_dir)]
+    camera_name = camera_name.split()
+    name_idx = -1
+    for i, cam_name in enumerate(camera_name):
+        if cam_name.lower() in existing_cameras:
+            cam_name = cam_name.lower()
+            name_idx = i
+            break
+    assert name_idx != -1, 'Camera name not found in calibration directory'
+    del camera_name[name_idx]
+    existing_models = [model_name.lower() for model_name in os.listdir(os.path.join(calib_dir, cam_name))]
+    filtered_models = []
+    for i, cam_name in enumerate(camera_name):
+        existing_models = [model.lower() for model in existing_models if cam_name.lower() in model]
+    existing_models = [model.lower() for model in existing_models if fps_str.lower() in model]
+    existing_models = [model.lower() for model in existing_models if resolution in model]
+    assert len(existing_models) == 1, 'More than one calibration file found: {}'.format(existing_models)
+    calib_file = os.path.join(calib_dir, camera_name, existing_models[0]+'.json')
+    return calib_file
+
+def load_calibration_file(file_path, camera_name, resolution, fps):
+    data = read_json_file(file_path)
     intrinsic_matrix = np.eye(3)
     intrinsic_matrix[0, 0] = data['f_x']
     intrinsic_matrix[0, 0] = data['f_y']
@@ -136,8 +180,9 @@ class FramePrevIterator:
 
 
 if __name__ == '__main__':
-    video_path = r'C:\Users\omri_\OneDrive\Documents\fpv\dji_airunit\2022_12_0910_sgula_kfar_hes_track\DJIU0013.mp4'
+    video_path = r'C:\Users\omri_\OneDrive\Documents\fpv\gopro\Yom_kipur_bike\GH010001.mp4'
     calib_path = r'C:\Users\omri_\PycharmProjects\neurogrammetry\config\dji_airunit_calib.yaml'
+    find_calib_file(video_path, camera_name="gopro black hero7")
     R_total = np.eye(3)
     t_total = np.zeros((3, 1))
     # initialization of a 3d plot with matplotlib:
@@ -151,7 +196,7 @@ if __name__ == '__main__':
     # ax.set_zlim3d(-1, 1)
     # ax.view_init(azim=0, elev=90)
 
-    for prev_frame, frame, prev_pts, pts, R, t in FramePrevIterator(video_path, calib_path, 100, scale_factor=0.5):
+    for prev_frame, frame, prev_pts, pts, R, t in FramePrevIterator(video_path, calib_path, 2000, scale_factor=0.5):
         t_total = np.matmul(CAM2WORLD, t).flatten()
         ax.scatter(t_total[0], t_total[1], t_total[2], c='r', marker='o')
         plt.pause(0.001)
